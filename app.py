@@ -1,25 +1,31 @@
-from flask import Flask, request, jsonify , render_template
-import tensorflow as tf
+from flask import Flask, request, jsonify, render_template
 import numpy as np
+import tensorflow as tf
 from PIL import Image
 import io
 
 app = Flask(__name__)
 
-model = tf.keras.models.load_model('best_vegetable_model.h5')
+# Load the TFLite model
+interpreter = tf.lite.Interpreter(model_path="best_vegetable_model.tflite")
+interpreter.allocate_tensors()
+
+# Get input and output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Class names
+class_names = ['Bean', 'Bitter_Gourd', 'Bottle_Gourd', 'Brinjal', 'Broccoli', 'Cabbage', 'Capsicum', 'Carrot', 'Cauliflower', 'Cucumber', 'Papaya', 'Potato', 'Pumpkin', 'Radish', 'Tomato']
 
 def image_processing(img):
     img = img.resize((224, 224))
-    img = np.array(img) / 255.0
+    img = np.array(img, dtype=np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
     return img
 
-class_names = ['Bean', 'Bitter_Gourd', 'Bottle_Gourd', 'Brinjal', 'Broccoli', 'Cabbage', 'Capsicum', 'Carrot', 'Cauliflower', 'Cucumber', 'Papaya', 'Potato', 'Pumpkin', 'Radish', 'Tomato']
-
-
 @app.route('/')
 def index():
-    return render_template('index.html') 
+    return render_template('index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -34,11 +40,17 @@ def predict():
     try:
         image = Image.open(io.BytesIO(file.read())).convert('RGB')
         processed_image = image_processing(image)
-        predictions = model.predict(processed_image)
+
+        # Run inference
+        interpreter.set_tensor(input_details[0]['index'], processed_image)
+        interpreter.invoke()
+        predictions = interpreter.get_tensor(output_details[0]['index'])
+
+        # Get the predicted class
         prediction = np.argmax(predictions[0])
         confidence = np.max(predictions[0])
 
-        return jsonify({'class': class_names[prediction], 'confidence': f"{confidence*100:.2f}%"})
+        return jsonify({'class': class_names[prediction], 'confidence': f"{confidence * 100:.2f}%"})
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
